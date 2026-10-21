@@ -17,6 +17,7 @@ public sealed class CadView : SKElement
     public bool PolarEnabled { get; set; }
     public bool Picking { get; set; }
     public Point2? Anchor { get; set; }
+    public long PaintedFrames { get; private set; }
     public event Action<Point2>? PointPicked;
     public event Action? SelectionChanged;
     public event Action<Point2>? CoordinateChanged;
@@ -27,7 +28,24 @@ public sealed class CadView : SKElement
     private Point? panStart, selectionStart;
     private Point2 panCenter;
     private Drawing? cachedDrawing;
-    private Drawing Drawing => cachedDrawing?.Revision == Session.Revision ? cachedDrawing : cachedDrawing = Session.Snapshot();
+    private SpatialIndex? viewIndex;
+    private Drawing Drawing
+    {
+        get
+        {
+            if (cachedDrawing?.Revision != Session.Revision)
+            {
+                cachedDrawing = Session.Snapshot();
+                viewIndex = new SpatialIndex(cachedDrawing.Entities, e => Geometry.Bounds(e, cachedDrawing));
+            }
+            return cachedDrawing!;
+        }
+    }
+    private IEnumerable<Entity> VisibleQuery(Bounds2 bounds)
+    {
+        var drawing = Drawing;
+        return viewIndex!.Query(bounds).Where(e => drawing.GetLayer(e.Layer).Visible);
+    }
     private double PixelRatio => ActualWidth > 0 ? CanvasSize.Width / ActualWidth : 1;
     public CadView(DrawingSession session)
     {
@@ -38,6 +56,13 @@ public sealed class CadView : SKElement
         SizeChanged += (_, _) => InvalidateVisual();
     }
     public Point2 World(Point p) => new(center.X + (p.X - ActualWidth / 2) / zoom, center.Y - (p.Y - ActualHeight / 2) / zoom);
+    public void PanBy(Point2 displacement) { center += displacement; InvalidateVisual(); }
+    public void UpdatePointer(Point pixel)
+    {
+        mousePixel = pixel;
+        mouseWorld = Picking ? Snap(World(mousePixel)) : World(mousePixel);
+        CoordinateChanged?.Invoke(mouseWorld); InvalidateVisual();
+    }
     public void Fit()
     {
         var d = Session.Snapshot(); if (d.Entities.Count == 0) { center = new(300, 200); zoom = .8; }
@@ -56,6 +81,7 @@ public sealed class CadView : SKElement
     }
     private void Paint(object? sender, SKPaintSurfaceEventArgs args)
     {
+        PaintedFrames++;
         var c = args.Surface.Canvas; c.Clear(new SKColor(15, 24, 35));
         var ratio = PixelRatio; c.Scale((float)ratio);
         c.Save(); c.Translate((float)(ActualWidth / 2), (float)(ActualHeight / 2)); c.Scale((float)zoom, (float)-zoom); c.Translate((float)-center.X, (float)-center.Y);
@@ -66,9 +92,9 @@ public sealed class CadView : SKElement
         for (var y = Math.Floor(min.Y / step) * step; y <= max.Y; y += step) c.DrawLine((float)min.X, (float)y, (float)max.X, (float)y, grid);
         using var axis = new SKPaint { Color = new SKColor(54, 85, 100), StrokeWidth = (float)(1 / zoom) };
         c.DrawLine((float)min.X, 0, (float)max.X, 0, axis); c.DrawLine(0, (float)min.Y, 0, (float)max.Y, axis);
-        var doc = Drawing.DeepCopy();
+        var doc = Drawing with { Entities = VisibleQuery(new(min.X, min.Y, max.X, max.Y)).ToList() };
         // Cull off-screen objects with the revision-indexed bounding-volume hierarchy.
-        doc.Entities = Session.Query(new(min.X, min.Y, max.X, max.Y)).ToList();
+
         DrawingRenderer.Draw(c, doc, zoom, Selection);
         if (Session.Preview is { } preview)
         {
@@ -104,29 +130,11 @@ public sealed class CadView : SKElement
             if (Math.Abs(angle - tracked) < Math.PI / 60) point = origin + new Point2(Math.Cos(tracked), Math.Sin(tracked)) * d.Length;
         }
         if (!SnapEnabled) return point;
-        var tol = 10 / zoom; var candidates = Session.Query(new Bounds2(point.X, point.Y, point.X, point.Y).Expand(tol));
-        var points = new List<Point2>();
-        foreach (var e in candidates)
-        {
-            if (e.Kind is EntityKind.Text or EntityKind.Dimension or EntityKind.Hatch) continue;
-            points.AddRange(e.Points);
-            foreach (var (p, q) in Geometry.Segments(e)) { points.Add((p + q) * .5); points.Add(Geometry.Closest(point, p, q)); if (Anchor is { } anchor) points.Add(Geometry.Closest(anchor, p, q)); }
-            if (e.Kind is EntityKind.Circle or EntityKind.Arc)
-            {
-                points.Add(e.Center); var delta = point - e.Center;
-                if (e.Kind == EntityKind.Arc) { points.Add(Geometry.AtAngle(e, e.StartAngle)); points.Add(Geometry.AtAngle(e, e.EndAngle)); }
-                if (delta.Length > Geometry.Epsilon && Geometry.OnArc(e, point)) points.Add(e.Center + delta * (e.Radius / delta.Length));
-                if (Anchor is { } tangentFrom) points.AddRange(Geometry.Tangents(e, tangentFrom));
-            }
-        }
-        var segments = candidates.SelectMany(Geometry.Segments).Take(100).ToArray();
-        for (var i = 0; i < segments.Length; i++) for (var j = i + 1; j < segments.Length; j++)
-            if (Geometry.Intersect(segments[i].A, segments[i].B, segments[j].A, segments[j].B) is { } cross) points.Add(cross);
-        var circles = candidates.Where(e => e.Kind is EntityKind.Circle or EntityKind.Arc).Take(50).ToArray();
-        foreach (var circle in circles) foreach (var segment in segments) points.AddRange(Geometry.LineCircle(segment.A, segment.B, circle));
-        for (var i = 0; i < circles.Length; i++) for (var j = i + 1; j < circles.Length; j++) points.AddRange(Geometry.CircleCircle(circles[i], circles[j]));
-        return points.Where(p => p.Distance(point) <= tol).OrderBy(p => p.Distance(point)).FirstOrDefault(point);
+        var tol = 10 / zoom;
+        var candidates = VisibleQuery(new Bounds2(point.X, point.Y, point.X, point.Y).Expand(tol));
+        return ObjectSnap.Find(candidates, point, tol, Anchor)?.Point ?? point;
     }
+
     private void MouseDownHandler(object sender, MouseButtonEventArgs e)
     {
         Focus(); var p = e.GetPosition(this);
@@ -145,19 +153,19 @@ public sealed class CadView : SKElement
         var shift = Keyboard.Modifiers.HasFlag(ModifierKeys.Shift);
         if ((end - start).Length < 4)
         {
-            var hit = Session.Query(new Bounds2(b.X, b.Y, b.X, b.Y).Expand(8 / zoom)).Where(x => !Drawing.GetLayer(x.Layer).Locked).OrderBy(x => Geometry.HitDistance(x, b, Drawing)).FirstOrDefault();
+            var hit = VisibleQuery(new Bounds2(b.X, b.Y, b.X, b.Y).Expand(8 / zoom)).Where(x => !Drawing.GetLayer(x.Layer).Locked).OrderBy(x => Geometry.HitDistance(x, b, Drawing)).FirstOrDefault();
             if (hit != null && Geometry.HitDistance(hit, b, Drawing) < 10 / zoom) { if (shift) Selection.Remove(hit.Id); else Selection.Add(hit.Id); }
             else if (!shift) Selection.Clear();
         }
-        else foreach (var entity in Session.Query(bounds))
-            if (!Drawing.GetLayer(entity.Layer).Locked && (end.X < start.X || bounds.Contains(Geometry.Bounds(entity, Drawing)))) { if (shift) Selection.Remove(entity.Id); else Selection.Add(entity.Id); }
+        else foreach (var entity in VisibleQuery(bounds))
+            if (!Drawing.GetLayer(entity.Layer).Locked && (end.X < start.X ? SelectionGeometry.Crosses(entity, bounds, Drawing) : bounds.Contains(Geometry.Bounds(entity, Drawing)))) { if (shift) Selection.Remove(entity.Id); else Selection.Add(entity.Id); }
         selectionStart = null; ReleaseMouseCapture(); SelectionChanged?.Invoke(); InvalidateVisual();
     }
     private void MouseMoveHandler(object sender, MouseEventArgs e)
     {
         mousePixel = e.GetPosition(this);
         if (panStart is { } start) center = panCenter + new Point2(-(mousePixel.X - start.X) / zoom, (mousePixel.Y - start.Y) / zoom);
-        mouseWorld = Picking ? Snap(World(mousePixel)) : World(mousePixel); CoordinateChanged?.Invoke(mouseWorld); InvalidateVisual();
+        UpdatePointer(mousePixel);
     }
     private void Wheel(object sender, MouseWheelEventArgs e)
     {

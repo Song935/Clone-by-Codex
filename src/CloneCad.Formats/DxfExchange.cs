@@ -107,6 +107,7 @@ public static class DxfExchange
                 var type = new LineType(name!); foreach (var length in name!.Contains("Center", StringComparison.OrdinalIgnoreCase) ? new[] { 8d, -2, 2, -2 } : new[] { 6d, -3 }) type.AddSegment(new LineType.Segment { Length = length }); doc.LineTypes.Add(type);
             }
         var blockCache = new Dictionary<Guid, BlockRecord>();
+        var dimensionPictureNumber = 0;
         foreach (var layer in drawing.Layers)
         {
             var l = doc.Layers.TryGetValue(layer.Name, out var existing) ? existing : new ACadSharp.Tables.Layer(layer.Name);
@@ -152,6 +153,34 @@ public static class DxfExchange
                 var style = new ACadSharp.Tables.DimensionStyle("CloneCad_" + entity.TextHeight.ToString(System.Globalization.CultureInfo.InvariantCulture)) { TextHeight = entity.TextHeight, ArrowSize = drawing.DimStyle.ArrowSize, DecimalPlaces = (short)drawing.DimStyle.Precision };
                 if (!doc.DimensionStyles.TryGetValue(style.Name, out var existingStyle)) { doc.DimensionStyles.Add(style); existingStyle = style; }
                 dimension.Style = existingStyle;
+                // DXF DIMENSION requires a referenced picture block. A numeric dimension
+                // without this block is removed by independent readers during audit.
+                var layout = Dimensions.Layout(entity, drawing.DimStyle);
+                var picture = new BlockRecord("*D" + ++dimensionPictureNumber);
+                foreach (var (a, b) in layout.Lines)
+                    picture.Entities.Add(Convert(new ModelEntity { Kind = EntityKind.Line, Layer = entity.Layer, Points = [a, b] }));
+                picture.Entities.Add(Convert(new ModelEntity
+                {
+                    Kind = EntityKind.Text,
+                    Layer = entity.Layer,
+                    Points = [layout.LabelPosition],
+                    Text = layout.Label,
+                    TextHeight = entity.TextHeight,
+                    FontFamily = entity.FontFamily,
+                    Rotation = layout.LabelAngle
+                }));
+                if (layout.ArcCenter is { } center)
+                    picture.Entities.Add(Convert(new ModelEntity
+                    {
+                        Kind = EntityKind.Arc,
+                        Layer = entity.Layer,
+                        Points = [center],
+                        Radius = layout.ArcRadius,
+                        StartAngle = layout.ArcStart,
+                        EndAngle = layout.ArcStart + layout.ArcSweep
+                    }));
+                dimension.TextMiddlePoint = V(layout.LabelPosition);
+                dimension.Block = picture;
             }
             return converted;
         }

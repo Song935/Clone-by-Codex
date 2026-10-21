@@ -62,6 +62,29 @@ public static class Editor
         var entities = ids.Select(id => doc.Entities.FirstOrDefault(x => x.Id == id) ?? throw new ArgumentException($"객체가 없습니다: {id}")).ToArray();
         if (entities.Any(e => doc.GetLayer(e.Layer).Locked)) throw new InvalidOperationException("잠긴 레이어 객체는 편집할 수 없습니다.");
         if (!double.IsFinite(op.Value) || !op.Vector.IsFinite || !op.Origin.IsFinite || !op.End.IsFinite) throw new ArgumentException("유효한 수치를 입력하세요.");
+        if (action is "copy" or "array")
+        {
+            if (action == "copy") doc.Entities.AddRange(CloneGroup(entities, e => Geometry.Transform(e, p => p + op.Vector)));
+            else
+            {
+                if (op.Count is < 1 or > 1000 || op.Rows is < 1 or > 1000 || !op.RowVector.IsFinite)
+                    throw new ArgumentException("배열 행·열 개수는 1~1000입니다.");
+                var rows = op.Name == "polar" ? 1 : op.Rows;
+                if (doc.Entities.Count + ((long)op.Count * rows - 1) * entities.Length > 100_000)
+                    throw new ArgumentException("배열 결과가 객체 한도를 초과합니다.");
+                for (var row = 0; row < rows; row++)
+                    for (var column = 0; column < op.Count; column++)
+                    {
+                        if (row == 0 && column == 0) continue;
+                        var shift = op.Vector * column + op.RowVector * row;
+                        var angle = op.Value * column;
+                        doc.Entities.AddRange(CloneGroup(entities, e => op.Name == "polar"
+                            ? Geometry.Transform(e, p => Geometry.Rotate(p, op.Origin, angle), rotate: angle)
+                            : Geometry.Transform(e, p => p + shift)));
+                    }
+            }
+            return;
+        }
         if (action is "trim" or "extend" or "fillet" or "chamfer")
         {
             EditCorner(doc, entities, op with { Action = action }); return;
@@ -109,7 +132,6 @@ public static class Editor
                     if (e.Kind is not (EntityKind.Line or EntityKind.Polyline)) throw new NotSupportedException("STRETCH는 선·폴리선만 지원합니다.");
                     var region = new Bounds2(Math.Min(op.Origin.X, op.End.X), Math.Min(op.Origin.Y, op.End.Y), Math.Max(op.Origin.X, op.End.X), Math.Max(op.Origin.Y, op.End.Y));
                     next = e with { Points = e.Points.Select(p => region.Contains(p) ? p + op.Vector : p).ToList() }; break;
-                case "copy": doc.Entities.Add(Geometry.Transform(e, p => p + op.Vector) with { Id = Guid.NewGuid() }); continue;
                 case "rotate": next = Geometry.Transform(e, p => Geometry.Rotate(p, op.Origin, op.Value), rotate: op.Value); break;
                 case "scale":
                     if (op.Value <= Geometry.Epsilon) throw new ArgumentException("축척은 0보다 커야 합니다.");
@@ -150,19 +172,13 @@ public static class Editor
                     if (e.Kind != EntityKind.Line) throw new NotSupportedException("OFFSET은 선·폴리선·원을 지원합니다.");
                     var d = e.Points[1] - e.Points[0]; var n = new Point2(-d.Y, d.X) * (op.Value / d.Length);
                     doc.Entities.Add(Geometry.Transform(e, p => p + n) with { Id = Guid.NewGuid() }); continue;
-                case "array":
-                    if (op.Count is < 1 or > 1000 || op.Rows is < 1 or > 1000 || !op.RowVector.IsFinite) throw new ArgumentException("배열 행·열 개수는 1~1000입니다.");
-                    if ((long)doc.Entities.Count + (long)op.Count * op.Rows * entities.Length > 100_000) throw new ArgumentException("배열 결과가 객체 한도를 초과합니다.");
-                    for (var row = 0; row < (op.Name == "polar" ? 1 : op.Rows); row++)
-                        for (var i = 0; i < op.Count; i++)
-                        { if (row == 0 && i == 0) continue; var shift = op.Vector * i + op.RowVector * row; doc.Entities.Add((op.Name == "polar" ? Geometry.Transform(e, p => Geometry.Rotate(p, op.Origin, op.Value * i), rotate: op.Value * i) : Geometry.Transform(e, p => p + shift)) with { Id = Guid.NewGuid() }); }
-                    continue;
                 case "explode":
                     if (e.Kind == EntityKind.Block)
                     {
                         var block = doc.Blocks.FirstOrDefault(b => b.Id == e.BlockId) ?? throw new ArgumentException("블록 정의가 없습니다.");
                         doc.Entities.RemoveAt(index);
-                        foreach (var child in block.Entities) doc.Entities.Add(Geometry.Transform(child, p => Geometry.Rotate(p * e.Scale, default, e.Rotation) + e.Center, e.Scale, e.Rotation) with { Id = Guid.NewGuid() });
+                        doc.Entities.AddRange(CloneGroup(block.Entities, child => Geometry.Transform(child,
+                            p => Geometry.Rotate(p * e.Scale, default, e.Rotation) + e.Center, e.Scale, e.Rotation)));
                         continue;
                     }
                     if (e.Kind != EntityKind.Polyline) throw new NotSupportedException("현재 EXPLODE는 폴리선만 지원합니다.");
@@ -173,6 +189,17 @@ public static class Editor
             }
             Geometry.Validate(next); doc.Entities[index] = next.DeepCopy();
         }
+    }
+
+    private static IEnumerable<Entity> CloneGroup(IEnumerable<Entity> source, Func<Entity, Entity> transform)
+    {
+        var originals = source.ToArray();
+        var newIds = originals.ToDictionary(e => e.Id, _ => Guid.NewGuid());
+        return originals.Select(e => transform(e) with
+        {
+            Id = newIds[e.Id],
+            References = e.References.Select(id => newIds.GetValueOrDefault(id, id)).ToList()
+        }).ToArray();
     }
 
     private static void EditCorner(Drawing doc, Entity[] entities, EditOperation op)
@@ -279,6 +306,8 @@ public sealed class DrawingSession
         lock (gate)
         {
             if (baseRevision != drawing.Revision) throw new InvalidOperationException("도면이 변경됐습니다. 최신 도면을 조회하고 다시 제안하세요.");
+            foreach (var id in pending.Where(item => item.Value.BaseRevision != drawing.Revision).Select(item => item.Key).ToArray())
+                pending.Remove(id);
             if (operations.Count is < 1 or > 1000) throw new ArgumentException("변경 연산은 1~1000개여야 합니다.");
             var copy = drawing.DeepCopy();
             foreach (var op in operations) Editor.Apply(copy, op);
@@ -303,7 +332,15 @@ public sealed class DrawingSession
     }
     public void Reject(Guid id)
     {
-        lock (gate) { pending.Remove(id); if (Preview?.Id == id) Preview = null; }
+        lock (gate)
+        {
+            pending.Remove(id);
+            if (Preview?.Id == id)
+            {
+                var remaining = pending.Values.LastOrDefault(p => p.BaseRevision == drawing.Revision);
+                Preview = remaining == null ? null : CadJson.Clone(remaining);
+            }
+        }
         Changed?.Invoke();
     }
     public void DiscardAllProposals()

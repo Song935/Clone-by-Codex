@@ -16,6 +16,7 @@ public readonly record struct Bounds2(double MinX, double MinY, double MaxX, dou
 public static class Geometry
 {
     public const double Epsilon = 1e-8;
+    public static double NormalizeDegrees(double angle) => (angle % 360 + 360) % 360;
     public static double Cross(Point2 a, Point2 b) => a.X * b.Y - a.Y * b.X;
     public static double Dot(Point2 a, Point2 b) => a.X * b.X + a.Y * b.Y;
     public static Point2 Rotate(Point2 p, Point2 origin, double degrees)
@@ -44,12 +45,12 @@ public static class Geometry
     {
         if (e.Kind != EntityKind.Arc) return true;
         var angle = Math.Atan2(point.Y - e.Center.Y, point.X - e.Center.X) * 180 / Math.PI;
-        return (angle - e.StartAngle + 720) % 360 <= (e.EndAngle - e.StartAngle + 720) % 360 + Epsilon;
+        return NormalizeDegrees(angle - e.StartAngle) <= NormalizeDegrees(e.EndAngle - e.StartAngle) + Epsilon;
     }
     public static Point2 AtAngle(Entity circle, double degrees) => circle.Center + new Point2(Math.Cos(degrees * Math.PI / 180), Math.Sin(degrees * Math.PI / 180)) * circle.Radius;
     public static IEnumerable<Point2> LineCircle(Point2 a, Point2 b, Entity circle)
     {
-        var d = b - a; var f = a - circle.Center; var aa = Dot(d, d); if (aa < Epsilon) yield break;
+        var d = b - a; var f = a - circle.Center; var aa = Dot(d, d); if (aa < Epsilon * Epsilon) yield break;
         var bb = 2 * Dot(f, d); var cc = Dot(f, f) - circle.Radius * circle.Radius; var discriminant = bb * bb - 4 * aa * cc; if (discriminant < -Epsilon) yield break;
         var sqrt = Math.Sqrt(Math.Max(0, discriminant));
         foreach (var t in new[] { (-bb - sqrt) / (2 * aa), (-bb + sqrt) / (2 * aa) }) if (t >= -Epsilon && t <= 1 + Epsilon && OnArc(circle, a + d * t)) yield return a + d * t;
@@ -74,12 +75,28 @@ public static class Geometry
             var block = drawing.Blocks.FirstOrDefault(b => b.Id == e.BlockId);
             if (block != null) return Bounds2.From(block.Entities.SelectMany(child =>
             {
-                var b = Bounds(child, drawing, depth + 1);
-                return new[] { new Point2(b.MinX, b.MinY), new Point2(b.MinX, b.MaxY), new Point2(b.MaxX, b.MinY), new Point2(b.MaxX, b.MaxY) }
-                    .Select(p => Rotate(p * e.Scale, default, e.Rotation) + e.Center);
+                var transformed = Transform(child, p => Rotate(p * e.Scale, default, e.Rotation) + e.Center, e.Scale, e.Rotation);
+                var b = Bounds(transformed, drawing, depth + 1);
+                return new[] { new Point2(b.MinX, b.MinY), new Point2(b.MaxX, b.MaxY) };
             }));
         }
-        if (e.Kind is EntityKind.Circle or EntityKind.Arc) return new(e.Center.X - e.Radius, e.Center.Y - e.Radius, e.Center.X + e.Radius, e.Center.Y + e.Radius);
+        if (e.Kind == EntityKind.Circle) return new(e.Center.X - e.Radius, e.Center.Y - e.Radius, e.Center.X + e.Radius, e.Center.Y + e.Radius);
+        if (e.Kind == EntityKind.Arc)
+        {
+            var endpoints = new[] { AtAngle(e, e.StartAngle), AtAngle(e, e.EndAngle) };
+            return Bounds2.From(endpoints.Concat(new[] { 0d, 90, 180, 270 }.Select(a => AtAngle(e, a)).Where(p => OnArc(e, p))));
+        }
+        if (e.Kind == EntityKind.Dimension)
+        {
+            var layout = Dimensions.Layout(e, drawing?.DimStyle ?? new());
+            var points = layout.Lines.SelectMany(line => new[] { line.A, line.B }).Append(layout.LabelPosition);
+            if (layout.ArcCenter is { } center)
+            {
+                var arc = new Entity { Kind = EntityKind.Arc, Points = [center], Radius = layout.ArcRadius, StartAngle = layout.ArcStart, EndAngle = layout.ArcStart + layout.ArcSweep };
+                var arcBounds = Bounds(arc); points = points.Concat([new(arcBounds.MinX, arcBounds.MinY), new(arcBounds.MaxX, arcBounds.MaxY)]);
+            }
+            return Bounds2.From(points).Expand(e.TextHeight);
+        }
         if (e.Kind == EntityKind.Text)
         {
             var lines = e.Text.Replace("\\P", "\n").Split('\n'); var width = lines.Max(l => l.Length) * e.TextHeight;
@@ -97,6 +114,16 @@ public static class Geometry
             return block?.Entities.Select(child => HitDistance(child, local, drawing, depth + 1) * Math.Abs(e.Scale)).DefaultIfEmpty(double.MaxValue).Min() ?? double.MaxValue;
         }
         if (e.Kind == EntityKind.Text) return Bounds(e).Contains(p) ? 0 : double.MaxValue;
+        if (e.Kind == EntityKind.Hatch && !e.Invalid && SelectionGeometry.ContainsPolygon(e.Points, p)) return 0;
+        if (e.Kind == EntityKind.Dimension)
+        {
+            var layout = Dimensions.Layout(e, drawing?.DimStyle ?? new());
+            var distance = layout.Lines.Select(s => p.Distance(Closest(p, s.A, s.B))).DefaultIfEmpty(double.MaxValue).Min();
+            if (layout.ArcCenter is { } center) distance = Math.Min(distance, HitDistance(new Entity
+            { Kind = EntityKind.Arc, Points = [center], Radius = layout.ArcRadius, StartAngle = layout.ArcStart, EndAngle = layout.ArcStart + layout.ArcSweep }, p));
+            if (Bounds(new Entity { Kind = EntityKind.Text, Points = [layout.LabelPosition], Text = layout.Label, TextHeight = e.TextHeight, Rotation = layout.LabelAngle }).Contains(p)) return 0;
+            return distance;
+        }
         if (e.Kind is EntityKind.Circle or EntityKind.Arc)
             return OnArc(e, p) ? Math.Abs(p.Distance(e.Center) - e.Radius) : Math.Min(p.Distance(AtAngle(e, e.StartAngle)), p.Distance(AtAngle(e, e.EndAngle)));
         return Segments(e).Select(s => p.Distance(Closest(p, s.A, s.B))).DefaultIfEmpty(p.Distance(e.Center)).Min();

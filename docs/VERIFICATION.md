@@ -5,7 +5,7 @@ This records observed results, not a claim of production readiness.
 | Check | Result |
 |---|---|
 | .NET 10 Release solution build | Passed, zero warnings/errors |
-| Automated tests | 38 passed, zero failed/skipped |
+| Automated tests | 47 passed, zero failed/skipped |
 | Hidden real WPF app smoke | Passed, app exited successfully |
 | GitHub CI | Template provided under docs/ci; activation pending workflow permission |
 | Command smoke | Lines, rectangles, circle, arc, Korean text, rectangular array, radius/angular dimensions, hatch, block definition/insertion |
@@ -30,3 +30,12 @@ Not yet verified:
 - General concave polyline offset topology, all text-formatting variants and all DXF style representations.
 
 Run `scripts/verify.ps1 -PdfCheck` (PyMuPDF installed) to regenerate test results, desktop/drawing/PDF previews and scale evidence under `artifacts/verification/`. No private drawing or live API credential is used.
+
+## Follow-up validation
+
+- Fixed missing DXF dimension picture blocks. Independent ezdxf 1.4.4 audit preserves all 21 synthetic entities and both dimensions, with zero errors or repairs; measured definition-point lengths are 600 and 1200. Korean text and layers survive.
+- Added regression tests for feature snap priority, crossing selection, arc bounds, dimension/hatch picking, copy/array reference remapping and proposal lifecycle.
+- Same-machine offscreen WPF pan + pointer/snap + render/composite benchmark (10,000 lines, 15 frames): mean 65.42ms before and 48.31ms after; p95 89.35ms before and 59.74ms after. This excludes human input delivery, display vsync and other devices, and is not a live display FPS guarantee.
+- Run `scripts/verify.ps1 -PdfCheck -DxfCheck`; Python dependencies: PyMuPDF and ezdxf==1.4.4.
+
+Repeated optimized run: mean 35.41ms and p95 44.75ms. These short samples vary with machine load; the earlier paired sample is retained above.

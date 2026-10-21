@@ -1,4 +1,4 @@
-param([string]$Configuration = 'Release', [switch]$PdfCheck)
+param([string]$Configuration = 'Release', [switch]$PdfCheck, [switch]$DxfCheck)
 . "$PSScriptRoot/common.ps1"
 Push-Location $ProjectRoot
 try {
@@ -17,6 +17,10 @@ try {
     if ($PdfCheck) {
         python scripts/verify_pdf.py artifacts/verification
         if ($LASTEXITCODE -ne 0) { throw 'Independent PDF verification failed.' }
+    }
+    if ($DxfCheck) {
+        python scripts/verify_dxf.py artifacts/verification
+        if ($LASTEXITCODE -ne 0) { throw 'Independent DXF verification failed.' }
     }
     $smoke | ConvertTo-Json -Depth 5
 }

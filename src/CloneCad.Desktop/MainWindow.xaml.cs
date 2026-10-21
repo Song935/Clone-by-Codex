@@ -337,6 +337,7 @@ public partial class MainWindow : Window
         }
         File.WriteAllBytes(Path.Combine(output, "drawing-preview.png"), DrawingRenderer.PreviewPng(drawing));
         var performance = MeasurePerformance();
+        var wpfPerformance = await MeasureWpfPerformance();
         File.WriteAllText(Path.Combine(output, "smoke-result.json"), JsonSerializer.Serialize(new
         {
             passed = true,
@@ -347,8 +348,33 @@ public partial class MainWindow : Window
             os = Environment.OSVersion.ToString(),
             runtime = Environment.Version.ToString(),
             performance,
+            wpfPerformance,
             anthropicLiveCall = "not tested: no user API key"
         }, CadJson.Options));
+    }
+    private async Task<object> MeasureWpfPerformance()
+    {
+        var doc = new Drawing
+        {
+            Name = "10k WPF benchmark",
+            Entities = Enumerable.Range(0, 10000).Select(i => new Entity
+            { Kind = EntityKind.Line, Points = [new(i % 100 * 10, i / 100 * 10), new(i % 100 * 10 + 8, i / 100 * 10 + 8)] }).ToList()
+        };
+        AddDocument(doc); await Dispatcher.InvokeAsync(() => { }, DispatcherPriority.ApplicationIdle);
+        var view = Current!.View; view.Fit(); view.Picking = true; view.Anchor = new(0, 0);
+        await Dispatcher.InvokeAsync(() => { }, DispatcherPriority.ApplicationIdle);
+        var durations = new List<double>(); var framesBefore = view.PaintedFrames;
+        var target = new System.Windows.Media.Imaging.RenderTargetBitmap((int)view.ActualWidth, (int)view.ActualHeight, 96, 96, System.Windows.Media.PixelFormats.Pbgra32);
+        for (var i = 0; i < 15; i++)
+        {
+            var timer = System.Diagnostics.Stopwatch.StartNew();
+            view.PanBy(new(.5, 0)); view.UpdatePointer(new(150 + i * 20, 200 + i * 5));
+            await Dispatcher.InvokeAsync(() => { }, DispatcherPriority.Render);
+            target.Render(view); durations.Add(timer.Elapsed.TotalMilliseconds);
+        }
+        var paints = view.PaintedFrames - framesBefore;
+        if (paints < 15) throw new InvalidOperationException("WPF benchmark did not repaint each frame.");
+        return new { entities = 10000, frames = durations.Count, paints, meanFrameMilliseconds = durations.Average(), p95FrameMilliseconds = durations.Order().ElementAt((int)Math.Ceiling(durations.Count * .95) - 1), fps = 1000 / durations.Average(), scope = "Offscreen WPF pan + pointer/snap + render/composite; excludes human input delivery, display vsync and other devices" };
     }
     private static object MeasurePerformance()
     {
