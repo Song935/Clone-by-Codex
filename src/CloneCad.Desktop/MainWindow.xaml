@@ -1,0 +1,44 @@
+<Window x:Class="CloneCad.Desktop.MainWindow" xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" Title="Clone by Codex · Agent CAD" Width="1480" Height="940" MinWidth="1000" MinHeight="680" Background="#101923" Foreground="#D9E6EF" FontFamily="Malgun Gothic" TextOptions.TextRenderingMode="Grayscale" PreviewKeyDown="Window_KeyDown" Closing="Window_Closing">
+ <DockPanel>
+  <Border DockPanel.Dock="Top" Background="#172231" Padding="14,10"><DockPanel>
+   <StackPanel DockPanel.Dock="Left" Orientation="Horizontal"><TextBlock Text="C / C" Foreground="#64DECE" FontWeight="Bold" FontSize="23" Margin="0,0,18,0"/><TextBlock Text="CLONE BY CODEX" Foreground="#D9E6EF" FontWeight="SemiBold" FontSize="18" VerticalAlignment="Center"/><TextBlock Text="  /  Agent CAD" Foreground="#839BAE" VerticalAlignment="Center"/></StackPanel>
+   <TextBlock Text="2D · 공개 개발 미리보기" Foreground="#839BAE" HorizontalAlignment="Right" VerticalAlignment="Center"/>
+  </DockPanel></Border>
+  <WrapPanel DockPanel.Dock="Top" Background="#1C2B3A" Margin="0,1">
+   <Button Content="새 도면" Click="New_Click"/><Button Content="열기" Click="Open_Click"/><Button Content="저장" Click="Save_Click"/><Button Content="닫기" Click="CloseDocument_Click"/><Button Content="DXF 가져오기" Click="Import_Click"/><Button Content="DXF 내보내기" Click="Export_Click"/><Button Content="PDF 출력" Click="Print_Click"/>
+   <Button Content="↶ UNDO" Tag="UNDO" Click="Command_Click"/><Button Content="↷ REDO" Tag="REDO" Click="Command_Click"/><Button Content="전체 보기" Click="Fit_Click"/><Button Content="검증 도면" Click="Sample_Click"/>
+  </WrapPanel>
+  <WrapPanel DockPanel.Dock="Top" Margin="6,4">
+   <Button Content="선 L" Tag="LINE" Click="Command_Click"/><Button Content="폴리선 PL" Tag="PLINE" Click="Command_Click"/><Button Content="사각형 REC" Tag="RECTANG" Click="Command_Click"/><Button Content="원 C" Tag="CIRCLE" Click="Command_Click"/><Button Content="호 A" Tag="ARC" Click="Command_Click"/>
+   <Button Content="이동 M" Tag="MOVE" Click="Command_Click"/><Button Content="복사 CO" Tag="COPY" Click="Command_Click"/><Button Content="회전 RO" Tag="ROTATE" Click="Command_Click"/><Button Content="축척 SC" Tag="SCALE" Click="Command_Click"/><Button Content="OFFSET O" Tag="OFFSET" Click="Command_Click"/><Button Content="문자 T" Tag="TEXT" Click="Command_Click"/><Button Content="치수 D" Tag="DIMALIGNED" Click="Command_Click"/><Button Content="해치 H" Tag="HATCH" Click="Command_Click"/>
+  </WrapPanel>
+  <Border DockPanel.Dock="Bottom" Background="#1A2B39" Padding="10,4"><DockPanel>
+   <StackPanel DockPanel.Dock="Right" Orientation="Horizontal"><CheckBox x:Name="SnapToggle" Content="스냅 F3" IsChecked="True" Checked="Mode_Changed" Unchecked="Mode_Changed"/><CheckBox x:Name="OrthoToggle" Content="직교 F8" Checked="Mode_Changed" Unchecked="Mode_Changed"/><CheckBox x:Name="PolarToggle" Content="각도 추적 F10" Checked="Mode_Changed" Unchecked="Mode_Changed"/><TextBlock x:Name="CoordinateStatus" Width="190" VerticalAlignment="Center"/></StackPanel>
+   <TextBlock x:Name="StatusText" Text="준비" VerticalAlignment="Center" Foreground="#A9BECE"/>
+  </DockPanel></Border>
+  <Border DockPanel.Dock="Bottom" Background="#101B27" Padding="10,6"><StackPanel>
+   <TextBox x:Name="CommandLog" Height="70" IsReadOnly="True" BorderThickness="0" Background="Transparent" VerticalScrollBarVisibility="Auto" FontFamily="Consolas"/>
+   <DockPanel><TextBlock x:Name="PromptText" Text="명령:" Foreground="#64DECE" VerticalAlignment="Center" Margin="4,0,12,0"/><TextBox x:Name="CommandInput" KeyDown="CommandInput_KeyDown" FontFamily="Consolas" ToolTip="명령어 또는 x,y / @dx,dy / @거리&lt;각도 · Esc 취소"/></DockPanel>
+  </StackPanel></Border>
+  <Grid>
+   <Grid.ColumnDefinitions><ColumnDefinition Width="190"/><ColumnDefinition Width="*"/><ColumnDefinition Width="340"/></Grid.ColumnDefinitions>
+   <Border Grid.Column="0" Background="#14202C" Padding="10"><DockPanel>
+    <StackPanel DockPanel.Dock="Top"><TextBlock Text="도면 속성" FontSize="14" Margin="0,8"/><TextBlock Text="현재 레이어" Foreground="#839BAE"/><ComboBox x:Name="LayerSelector" SelectionChanged="LayerSelector_Changed"/>
+     <WrapPanel><Button Content="추가" Click="AddLayer_Click"/><Button Content="수정" Tag="edit" Click="AddLayer_Click"/><Button Content="표시" Click="ToggleLayer_Click"/><Button Content="잠금" Click="LockLayer_Click"/></WrapPanel>
+     <TextBlock Text="단위" Foreground="#839BAE" Margin="0,12,0,0"/><ComboBox x:Name="UnitSelector" SelectionChanged="Units_Changed"><ComboBoxItem Content="mm"/><ComboBoxItem Content="cm"/><ComboBoxItem Content="m"/><ComboBoxItem Content="inch"/></ComboBox>
+     <TextBlock Text="선택 객체" Margin="0,14,0,4"/><Button Content="속성 편집" Click="EditProperties_Click"/><Button Content="선택 삭제" Tag="ERASE" Click="Command_Click"/><Button Content="치수 스타일" Click="DimensionStyle_Click"/>
+    </StackPanel>
+    <TextBox x:Name="PropertiesText" IsReadOnly="True" TextWrapping="Wrap" VerticalScrollBarVisibility="Auto" BorderThickness="0" Background="Transparent"/>
+   </DockPanel></Border>
+   <TabControl x:Name="DocumentTabs" Grid.Column="1" Background="#111B27" BorderThickness="0" SelectionChanged="DocumentTabs_Changed"/>
+   <Border Grid.Column="2" Background="#172231" Padding="14"><DockPanel>
+    <StackPanel DockPanel.Dock="Top"><TextBlock Text="AI 작업 파트너" FontSize="17" FontWeight="SemiBold"/><TextBlock Text="도면 조회 → 변경안 → 사용자 적용" Foreground="#839BAE" Margin="0,5,0,12"/>
+     <Expander Header="Anthropic 연결 설정" Foreground="#D9E6EF"><StackPanel Margin="0,8"><TextBlock Text="API 키 (Windows 자격 증명에 저장)"/><PasswordBox x:Name="ApiKeyInput" Margin="0,5"/><TextBlock Text="모델 ID"/><TextBox x:Name="ModelInput" Margin="0,5"/><Button Content="연결 설정 저장" Click="Settings_Click"/><Button Content="외부 에이전트 연결 정보 복사" Click="Connection_Click"/></StackPanel></Expander>
+     <Border x:Name="ProposalPanel" Background="#203D3B" Padding="10" Margin="0,10" Visibility="Collapsed"><StackPanel><TextBlock Text="검토할 변경안" Foreground="#6BE7CE" FontWeight="Bold"/><TextBlock x:Name="ProposalText" TextWrapping="Wrap" Margin="0,7"/><WrapPanel><Button Content="도면에 적용" Click="Approve_Click"/><Button Content="거부" Click="Reject_Click"/></WrapPanel></StackPanel></Border>
+    </StackPanel>
+    <StackPanel DockPanel.Dock="Bottom"><TextBlock Text="클라우드 AI에는 요청에 필요한 도면 정보가 전송됩니다." FontSize="11" Foreground="#839BAE" TextWrapping="Wrap" Margin="0,6"/><TextBox x:Name="ChatInput" Height="86" AcceptsReturn="True" TextWrapping="Wrap" VerticalScrollBarVisibility="Auto" ToolTip="예: 폭 600, 높이 900 사각형과 중심에 지름 100인 원을 만들어줘"/><WrapPanel HorizontalAlignment="Right"><Button x:Name="SendButton" Content="작업 요청 →" Click="Send_Click"/><Button Content="중단" Click="CancelAgent_Click"/></WrapPanel></StackPanel>
+    <TextBox x:Name="ChatLog" IsReadOnly="True" AcceptsReturn="True" TextWrapping="Wrap" VerticalScrollBarVisibility="Auto" Background="Transparent" BorderThickness="0" Text="안녕하세요. 치수와 작업 대상을 알려 주세요.&#10;AI 변경은 승인 전까지 도면에 적용되지 않습니다.&#10;&#10;API 연결 전에는 검증 도면으로 작도·저장·출력을 확인할 수 있습니다."/>
+   </DockPanel></Border>
+  </Grid>
+ </DockPanel>
+</Window>

@@ -1,0 +1,11 @@
+bin/
+obj/
+artifacts/
+.vs/
+*.user
+*.cbcad
+*.dxf
+*.pdf
+*.log
+.env
+TestResults/
