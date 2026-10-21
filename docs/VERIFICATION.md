@@ -39,3 +39,9 @@ Run `scripts/verify.ps1 -PdfCheck` (PyMuPDF installed) to regenerate test result
 - Run `scripts/verify.ps1 -PdfCheck -DxfCheck`; Python dependencies: PyMuPDF and ezdxf==1.4.4.
 
 Repeated optimized run: mean 35.41ms and p95 44.75ms. These short samples vary with machine load; the earlier paired sample is retained above.
+
+## Startup and installer follow-up
+
+- Install.cmd now launches the CAD after installation and retains the console on failure. Tested the installer against the default per-user installation directory; the launched main window remained responsive.
+- Startup exceptions now show an error dialog with a local log path. Logging failure does not hide the original error. Invalid/missing model settings are ignored.
+- Release build, 47 tests, WPF smoke and independent PDF/DXF checks passed again for 0.1.2-preview.

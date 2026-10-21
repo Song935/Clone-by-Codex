@@ -1,4 +1,4 @@
-param([string]$Destination = (Join-Path $env:LOCALAPPDATA 'Programs\CloneCad'),[switch]$NoShortcut)
+param([string]$Destination = (Join-Path $env:LOCALAPPDATA 'Programs\CloneCad'),[switch]$NoShortcut,[switch]$Launch)
 $ErrorActionPreference = 'Stop'
 $source = Join-Path $PSScriptRoot 'app'
 if (-not (Test-Path -LiteralPath (Join-Path $source 'CloneCad.Desktop.exe'))) { throw 'Extract the complete release ZIP before installing.' }
@@ -22,3 +22,6 @@ if(-not $NoShortcut){
 }
 Write-Host "Installed: $target"
 Write-Host 'Launch Clone by Codex from the Start menu. Existing drawings and credentials were preserved.'
+if ($Launch) {
+    Start-Process -FilePath (Join-Path $target 'CloneCad.Desktop.exe') -WorkingDirectory $target
+}

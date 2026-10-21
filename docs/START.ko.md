@@ -4,7 +4,9 @@
 
 ## 실행
 
-배포 ZIP을 풀고 `Install.cmd`를 실행하면 현재 사용자에게 설치됩니다. 또는 `app/CloneCad.Desktop.exe`를 직접 실행합니다. .NET 런타임은 배포판에 포함됩니다.
+배포 ZIP을 풀고 `Install.cmd`를 실행하면 현재 사용자에게 설치한 뒤 CAD가 자동으로 열립니다. 이후에는 시작 메뉴의 **Clone by Codex**로 실행합니다. 또는 `app/CloneCad.Desktop.exe`를 직접 실행합니다. .NET 런타임은 배포판에 포함됩니다.
+
+시작 오류가 발생하면 안내 창에 표시된 오류와 `%LOCALAPPDATA%\CloneCad\logs\errors.log`를 확인합니다. 로그를 공유하기 전 개인 경로나 도면 정보가 포함됐는지 확인하세요.
 
 소스 실행은 .NET 10 SDK 설치 후 `scripts/run.ps1`을 사용합니다. 개발 PC에서는 `D:\Song\.tools\dotnet10`의 SDK도 자동으로 찾습니다.
 

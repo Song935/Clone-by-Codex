@@ -42,8 +42,13 @@ public partial class MainWindow : Window
         var settings = Path.Combine(appData, "settings.json");
         if (File.Exists(settings))
         {
-            try { ModelInput.Text = JsonDocument.Parse(File.ReadAllText(settings)).RootElement.GetProperty("model").GetString() ?? ""; }
-            catch (JsonException) { }
+            try
+            {
+                using var config = JsonDocument.Parse(File.ReadAllText(settings));
+                if (config.RootElement.ValueKind == JsonValueKind.Object && config.RootElement.TryGetProperty("model", out var model) && model.ValueKind == JsonValueKind.String)
+                    ModelInput.Text = model.GetString() ?? "";
+            }
+            catch (Exception ex) when (ex is JsonException or IOException or UnauthorizedAccessException) { }
         }
         AddDocument(new());
         recoveryTimer = new(TimeSpan.FromMinutes(5), DispatcherPriority.Background, (_, _) => SaveRecovery(), Dispatcher);
